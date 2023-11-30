@@ -3,13 +3,14 @@ use crate::lexer::{KeyWord, Punct, Token};
 use crate::parser::ast::expression::{AstExpression, AstTyped};
 use crate::parser::ast::Parsable;
 use crate::parser::{expect_token, local, ParseError, Parser};
+use crate::parser::ast::ast_pattern_matching::AstPattern;
 use crate::parser::ast::ast_type::AstType;
 use crate::parser::r#type::core::CORE_VOID;
 
 
 #[derive(Clone, Debug, PartialEq)]
 struct SwitchCase {
-    cond: AstExpression,
+    cond: AstPattern,
     val: AstExpression,
 }
 
@@ -35,7 +36,7 @@ impl Parsable for SwitchCase {
     type Output = SwitchCase;
 
     fn parse(parser: &mut Parser) -> Result<Self::Output, ParseError> {
-        let cond = AstExpression::parse(parser)?;
+        let cond = AstPattern::parse(parser)?;
         expect_token!(parser; (Token::Punct(Punct::BigRightArrow))
             expected "switch case value starting with `=>`")?;
         let val = AstExpression::parse(parser)?;
@@ -53,7 +54,7 @@ impl Parsable for AstSwitch {
 
     fn parse(parser: &mut Parser) -> Result<Self::Output, ParseError> {
         expect_token!(parser; (Token::Key(KeyWord::Switch))
-            expected "switch case")?;
+            expected "match case")?;
         let cond = Box::new(AstExpression::parse(parser)?);
 
         expect_token!(parser; (Token::Punct(Punct::BraceOpen)) expected "`{`")?;
@@ -114,7 +115,7 @@ impl AstTyped for AstSwitch {
 
 impl Display for AstSwitch {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "switch {{ ")?;
+        write!(f, "match {{ ")?;
 
         let mut iter = self.cases.iter();
         if let Some(e) = iter.next() {

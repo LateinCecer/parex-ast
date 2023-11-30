@@ -428,7 +428,7 @@ mod test {
                 1
             };
 
-            switch x {
+            match x {
                 0 => std::print("0"),
                 _ => {
                     std::print("Hello, world!")

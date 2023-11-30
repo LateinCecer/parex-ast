@@ -88,7 +88,7 @@ impl Display for KeyWord {
             KeyWord::Const => write!(f, "const"),
             KeyWord::Mut => write!(f, "mut"),
             KeyWord::Let => write!(f, "let"),
-            KeyWord::Switch => write!(f, "switch"),
+            KeyWord::Switch => write!(f, "match"),
             KeyWord::If => write!(f, "if"),
             KeyWord::Else => write!(f, "else"),
             KeyWord::Loop => write!(f, "loop"),
@@ -753,7 +753,7 @@ impl<'a> Lexer<'a> {
             s if s == "enum" => Ok(Token::Key(KeyWord::Enum).localize(pos)),
             s if s == "const" => Ok(Token::Key(KeyWord::Const).localize(pos)),
             s if s == "let" => Ok(Token::Key(KeyWord::Let).localize(pos)),
-            s if s == "switch" => Ok(Token::Key(KeyWord::Switch).localize(pos)),
+            s if s == "match" => Ok(Token::Key(KeyWord::Switch).localize(pos)),
             s if s == "if" => Ok(Token::Key(KeyWord::If).localize(pos)),
             s if s == "else" => Ok(Token::Key(KeyWord::Else).localize(pos)),
             s if s == "loop" => Ok(Token::Key(KeyWord::Loop).localize(pos)),
@@ -808,7 +808,7 @@ mod test {
         assert_eq!(Lexer::new("struct").next_token().map(|t| t.token), Ok(Token::Key(KeyWord::Struct)));
         assert_eq!(Lexer::new("const").next_token().map(|t| t.token), Ok(Token::Key(KeyWord::Const)));
         assert_eq!(Lexer::new("let").next_token().map(|t| t.token), Ok(Token::Key(KeyWord::Let)));
-        assert_eq!(Lexer::new("switch").next_token().map(|t| t.token), Ok(Token::Key(KeyWord::Switch)));
+        assert_eq!(Lexer::new("match").next_token().map(|t| t.token), Ok(Token::Key(KeyWord::Switch)));
         assert_eq!(Lexer::new("if").next_token().map(|t| t.token), Ok(Token::Key(KeyWord::If)));
         assert_eq!(Lexer::new("loop").next_token().map(|t| t.token), Ok(Token::Key(KeyWord::Loop)));
         assert_eq!(Lexer::new("return").next_token().map(|t| t.token), Ok(Token::Key(KeyWord::Return)));

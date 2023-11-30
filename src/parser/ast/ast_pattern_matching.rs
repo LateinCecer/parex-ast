@@ -9,8 +9,8 @@ use crate::parser::ast::literal::{AstBoolLiteral, AstCharLiteral, AstNumberLiter
 use crate::parser::ast::name::AstNameExpr;
 
 
-#[derive(Debug, Clone)]
-enum AstPattern {
+#[derive(Debug, Clone, PartialEq)]
+pub enum AstPattern {
     Value { expr: AstExpression, pos: SrcPos },
     Or { members: Vec<AstPattern>, pos: SrcPos },
     NamedStruct { ty: AstType, params: HashMap<String, AstPattern>, pos: SrcPos },
