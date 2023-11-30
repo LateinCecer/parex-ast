@@ -28,6 +28,7 @@ pub mod ast_trait;
 pub mod ast_const;
 pub mod ast_use;
 pub mod ast_type_def;
+mod ast_pattern_matching;
 
 
 pub struct Ast {

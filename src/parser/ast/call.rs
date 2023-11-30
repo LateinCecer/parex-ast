@@ -143,7 +143,7 @@ impl AstInit {
                         parser.next()?;
                         break;
                     }
-                    let name = expect_token!(parser; (Token::Ident(name)) => name
+                    let name = expect_token!(parser; (Token::Ident(name)) => (name.clone())
                         expected "parameter name")?;
 
                     // check for value expression

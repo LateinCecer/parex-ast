@@ -78,6 +78,10 @@ impl ParameterList {
             params: Vec::new(),
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.params.is_empty()
+    }
 }
 
 impl TypeNameEntry {
@@ -142,7 +146,11 @@ impl TypeNameEntry {
 
 impl Display for TypeNameEntry {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}::{}", self.name, self.params)
+        if self.params.is_empty() {
+            write!(f, "{}", self.name)
+        } else {
+            write!(f, "{}::{}", self.name, self.params)
+        }
     }
 }
 
