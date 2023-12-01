@@ -7,7 +7,8 @@ use crate::parser::ast::ast_impl::AstImpl;
 use crate::parser::ast::ast_trait::AstTrait;
 use crate::parser::ast::ast_type::{AstType, TypeName};
 use crate::parser::ast::ast_type_def::AstTypeDef;
-
+use crate::parser::ast::ast_use::AstUse;
+use crate::parser::resolver::{ItemVariant, ScopeId};
 
 
 #[derive(Clone, Debug)]
@@ -19,6 +20,8 @@ struct PreModule {
     impls: Vec<PreImpl>,
     traits: Vec<PreTrait>,
     funcs: Vec<PreFunc>,
+    uses: Vec<AstUse>,
+    stack_level: ScopeId,
 }
 
 
@@ -54,19 +57,16 @@ pub struct PreTrait {
 #[derive(Clone, Debug)]
 pub struct PreFunc {
     pos: SrcPos,
+    name: String,
 }
 
 
 #[derive(Clone, Debug)]
 pub struct PreConst {
     pos: SrcPos,
+    name: String,
 }
 
-
-#[derive(Clone, Debug)]
-pub struct PreUse {
-    pos: SrcPos
-}
 
 
 fn skip_type(parser: &mut Parser) -> Result<(), ParseError> {
@@ -195,11 +195,15 @@ impl Parsable for PreFunc {
     fn parse(parser: &mut Parser) -> Result<Self::Output, ParseError> {
         let pos = expect_token!(parser; (Token::Key(KeyWord::Fn)), pos => pos
             expected "`fn` keyword")?;
+        parser.skip_env()?;
+        let name = expect_token!(parser; (Token::Ident(name)) => name
+            expected "function name identifier")?;
         skip_to!(parser, (Token::Punct(Punct::BraceOpen)))?;
 
         parser.skip_brace()?;
         Ok(PreFunc {
-            pos
+            pos,
+            name,
         })
     }
 }
@@ -239,14 +243,16 @@ impl Parsable for PreTrait {
 }
 
 
-impl Parsable for PreModule {
-    type Output = Self;
+impl PreModule {
 
-    fn parse(parser: &mut Parser) -> Result<Self::Output, ParseError> {
+    fn parse(parser: &mut Parser, name: String) -> Result<Self, ParseError> {
+        parser.env.push(Some(name), true);
+
         let mut types = Vec::new();
         let mut impls= Vec::new();
         let mut traits = Vec::new();
         let mut funcs = Vec::new();
+        let mut uses = Vec::new();
 
         loop {
             match parser.peak() {
@@ -265,6 +271,9 @@ impl Parsable for PreModule {
                 Ok(local!(Token::Key(KeyWord::Const))) => {
                     unimplemented!()
                 },
+                Ok(local!(Token::Key(KeyWord::Use))) => {
+                    uses.push(AstUse::parse(parser)?);
+                }
                 Ok(_) => {
                     return Err(ParseError::UnexpectedToken(
                         Box::new(parser.next().unwrap()),
@@ -275,36 +284,77 @@ impl Parsable for PreModule {
             }
         }
 
-
-        Ok(PreModule {
+        // create module and add items into the namespace entry for it
+        let module = PreModule {
             name: None, pos: None,
             types,
             impls,
             traits,
             funcs,
-        })
+            uses,
+            stack_level: parser.env.current_scope()?.clone(),
+        };
+        module.push_structures(parser)?;
+        module.push_funcs(parser)?;
+        module.push_traits(parser)?;
+
+        // pop out of the current stack level
+        parser.env.pop();
+        Ok(module)
     }
 }
 
 impl PreModule {
+    /// Pushes types to the namespace structure of the parser
     pub fn push_structures(&self, parser: &mut Parser) -> Result<(), ParseError> {
         // push structs
         for s in self.types.iter() {
             match &s.var {
                 PreTypeVariant::Struct => {
-                    parser.env.push_struct(s.name.clone().into(), s.pos)?;
+                    parser.env.push_top_level_item(s.name.clone(), s.pos, ItemVariant::Type)?;
                 }
                 PreTypeVariant::Enum(vars) => {
+                    parser.env.push_top_level_item(s.name.clone(), s.pos, ItemVariant::Type)?;
+                    parser.env.push(Some(s.name.clone()), false);
                     for var in vars.iter() {
-                        parser.env.push_struct(
-                            TypeName::from(vec![s.name.clone(), var.clone()]),
-                            s.pos)?;
+                        parser.env.push_top_level_item(
+                            var.clone(),
+                            s.pos,
+                            ItemVariant::Type
+                        )?;
                     }
+                    parser.env.pop();
                 }
                 PreTypeVariant::Alias => {
-                    parser.env.push_alias(s.name.clone().into(), s.pos)?;
+                    parser.env.push_top_level_item(s.name.clone(), s.pos, ItemVariant::Type)?;
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// Pushes traits to the namespace structure of the parser.
+    pub fn push_traits(&self, parser: &mut Parser) -> Result<(), ParseError> {
+        // push traits
+        for t in self.traits.iter() {
+            parser.env.push_top_level_item(t.name.clone(), t.pos, ItemVariant::Trait)?;
+        }
+        Ok(())
+    }
+
+    /// Pushes **top-level** functions to the namespace structure of the parser.
+    pub fn push_funcs(&self, parser: &mut Parser) -> Result<(), ParseError> {
+        // push funcs
+        for f in self.funcs.iter() {
+            parser.env.push_top_level_item(f.name.clone(), f.pos, ItemVariant::Function)?;
+        }
+        Ok(())
+    }
+
+    pub fn push_use(&self, parser: &mut Parser) -> Result<(), ParseError> {
+        // push uses
+        for u in self.uses.iter() {
+            parser.env.push_use(u.path.clone())?;
         }
         Ok(())
     }
@@ -402,14 +452,12 @@ mod test {
         "#;
 
         let mut parser = Parser::new(src);
-        let module = PreModule::parse(&mut parser)?;
+        let module = PreModule::parse(&mut parser, "test".to_string())?;
 
         println!("pre-parse module: {:#?}", module);
-        parser.env.push();
-        module.push_structures(&mut parser)?;
-
 
         // parse structs
+        parser.env.revert_to_scope(&module.stack_level);
         let types = module.parse_types(&mut parser)?;
         let funcs = module.parse_funcs(&mut parser)?;
         let impls = module.parse_impl(&mut parser)?;

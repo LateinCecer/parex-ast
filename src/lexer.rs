@@ -76,6 +76,7 @@ pub enum KeyWord {
     As,
     Where,
     Type,
+    Use,
 }
 
 impl Display for KeyWord {
@@ -102,6 +103,7 @@ impl Display for KeyWord {
             KeyWord::As => write!(f, "as"),
             KeyWord::Where => write!(f, "where"),
             KeyWord::Type => write!(f, "type"),
+            KeyWord::Use => write!(f, "use"),
         }
     }
 }
@@ -768,6 +770,7 @@ impl<'a> Lexer<'a> {
             s if s == "as" => Ok(Token::Key(KeyWord::As).localize(pos)),
             s if s == "where" => Ok(Token::Key(KeyWord::Where).localize(pos)),
             s if s == "type" => Ok(Token::Key(KeyWord::Type).localize(pos)),
+            s if s == "use" => Ok(Token::Key(KeyWord::Use).localize(pos)),
             s => Ok(Token::Ident(s).localize(pos)),
         }
     }
@@ -820,6 +823,7 @@ mod test {
         assert_eq!(Lexer::new("Self").next_token().map(|t| t.token), Ok(Token::Key(KeyWord::TySelf)));
         assert_eq!(Lexer::new("mut").next_token().map(|t| t.token), Ok(Token::Key(KeyWord::Mut)));
         assert_eq!(Lexer::new("where").next_token().map(|t| t.token), Ok(Token::Key(KeyWord::Where)));
+        assert_eq!(Lexer::new("use").next_token().map(|t| t.token), Ok(Token::Key(KeyWord::Use)));
 
         assert_eq!(Lexer::new("+").next_token().map(|t| t.token), Ok(Token::Punct(Punct::Plus)));
         assert_eq!(Lexer::new("-").next_token().map(|t| t.token), Ok(Token::Punct(Punct::Minus)));

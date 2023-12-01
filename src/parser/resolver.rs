@@ -1,12 +1,15 @@
+mod namespace;
+
 use std::any::TypeId;
 use std::collections::{HashMap};
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 use rand::{Rng, thread_rng};
 use crate::lexer::SrcPos;
-use crate::parser::ast::ast_type::TypeName;
+use crate::parser::ast::ast_type::{QualifierName, TypeName};
 use crate::parser::func::FuncSignature;
 use crate::parser::r#type::{LangTypeId, Type, TypeRegistry, TypeSignature};
+use crate::parser::resolver::namespace::{Namespace};
 
 
 #[derive(Clone, Debug)]
@@ -16,6 +19,8 @@ pub enum ResolveError {
     TypeRegistry(Rc<dyn TypeSignature>, SrcPos),
     EmptyTypeRegistry(SrcPos),
     EmptyStack,
+    InvalidUse(QualifierName),
+    EmptyQualifierName,
 }
 
 impl PartialEq for ResolveError {
@@ -56,6 +61,20 @@ impl PartialEq for ResolveError {
                     false
                 }
             }
+            ResolveError::InvalidUse(name) => {
+                if let ResolveError::InvalidUse(other_name) = other {
+                    name.clone() == other_name.clone()
+                } else {
+                    false
+                }
+            }
+            ResolveError::EmptyQualifierName => {
+                if let ResolveError::EmptyQualifierName = other {
+                    true
+                } else {
+                    false
+                }
+            }
         }
     }
 }
@@ -79,6 +98,12 @@ impl Display for ResolveError {
             }
             ResolveError::EmptyStack => {
                 write!(f, "The resolver stack is empty")
+            }
+            ResolveError::InvalidUse(name) => {
+                write!(f, "Qualifier name '{name}' does not point to a namespace or item in this project")
+            }
+            ResolveError::EmptyQualifierName => {
+                write!(f, "Empty qualifier name")
             }
         }
     }
@@ -153,55 +178,146 @@ impl ScopeId {
 
 
 struct StackLvl {
-    struct_names: HashMap<String, LangTypeId>,
-    structs: HashMap<LangTypeId, StructDef>,
-
-    variable_names: HashMap<String, LangTypeId>,
-    variables: HashMap<LangTypeId, VarDef>,
-
-    fn_names:  HashMap<String, LangTypeId>,
-    fns: HashMap<LangTypeId, FnDef>,
-
-    methods: HashMap<Type, ImplCollection>,
     id: ScopeId,
+    imports: Imports,
+    stack: Vec<ScopeId>,
+    is_module: bool,
+    items: Namespace<Item>,
+    self_type: Option<QualifierName>,
 }
 
-pub struct NameResolver {
+struct Imports {
+    namespaces: HashMap<String, QualifierName>,
+    base_namespace: QualifierName,
+}
+
+impl Imports {
+    fn new(base_namespace: QualifierName) -> Self {
+        Imports {
+            namespaces: HashMap::new(),
+            base_namespace,
+        }
+    }
+
+    fn self_type<'a>(&self, namespace: &'a Namespace<Item>) -> Option<&'a Item> {
+        namespace.resolve(&self.base_namespace)
+    }
+
+    /// Resolves a qualifier path to an item using the specified namespace hierarchy and local
+    /// imports / `use` statements.
+    fn resolve_type<'a>(&self, path: &QualifierName, namespace: &'a Namespace<Item>) -> Option<&'a Item> {
+        if let Some(first) = path.first() {
+            // look for first entry in imported namespaces and filter from there
+            if let Some(search_path) = self.namespaces.get(first) {
+                let mut iter = path.iter();
+                iter.next(); // pop first element
+                let mut path = search_path.clone();
+                for next in iter {
+                    path.push(next.clone());
+                }
+                // try to find item in the namespace tree
+                if let Some(item) = namespace.resolve(&path) {
+                    return Some(item);
+                }
+            }
+
+            // try to resolve by prefixing the path with the local base namespace
+            let mut qualifier_name = self.base_namespace.clone();
+            for next in path.iter() {
+                qualifier_name.push(next.clone());
+            }
+            if let Some(item) = namespace.resolve(&qualifier_name) {
+                return Some(item);
+            }
+
+            // search from the bottom of the namespace instead
+        }
+        // see if there is anything in the root of the namespace hierarchy
+        namespace.resolve(path)
+    }
+
+
+    /// Inserts a reference to a namespace.
+    ///
+    /// # Example
+    ///
+    /// In the code, this would look like this:
+    /// ``
+    /// use path::to::lib;
+    /// ``
+    fn insert_namespace(&mut self, namespace: &Namespace<Item>, path: QualifierName) -> Result<(), ResolveError> {
+        if let Some(last) = path.last() {
+            let last = last.to_owned();
+            // check if the path leads to a namespace
+            if namespace.is_namespace(&path) || namespace.is_item(&path) {
+                self.namespaces.insert(last, path);
+                Ok(())
+            } else {
+                Err(ResolveError::InvalidUse(path))
+            }
+        } else {
+            Err(ResolveError::EmptyQualifierName)
+        }
+    }
+}
+
+
+pub struct Item {
+    type_id: LangTypeId,
+    variant: ItemVariant,
+}
+
+pub enum ItemVariant {
+    Type,
+    Function,
+    Trait,
+    Const,
+}
+
+struct Stack {
     stack: Vec<ScopeId>,
     memory: HashMap<ScopeId, StackLvl>,
 }
 
-impl NameResolver {
-    pub fn new() -> Self {
-        NameResolver {
+impl Stack {
+    fn new() -> Self {
+        Stack {
             stack: Vec::new(),
             memory: HashMap::new(),
         }
     }
 
-    pub fn current_scope(&self) -> Result<&ScopeId, ResolveError> {
+    fn revert_to_scope(&mut self, scope: &ScopeId) {
+        if let Some(lvl) = self.memory.get(scope) {
+            self.stack.clear();
+            for &el in &lvl.stack {
+                self.stack.push(el);
+            }
+        }
+    }
+
+    fn current_scope(&self) -> Result<&ScopeId, ResolveError> {
         self.stack.last().ok_or(ResolveError::EmptyStack)
     }
 
-    pub fn pop(&mut self) {
-        self.stack.pop();
+    fn current_level(&self) -> Result<&StackLvl, ResolveError> {
+        self.stack.last()
+            .and_then(|idx| self.memory.get(idx))
+            .ok_or(ResolveError::EmptyStack)
     }
 
-    pub fn push(&mut self) {
-        // find new id
-        let mut id = ScopeId::rand();
-        while self.memory.contains_key(&id) {
-            id = ScopeId::rand();
-        }
-        // push new resolve level
-        self.memory.insert(id, StackLvl::new(id));
-        self.stack.push(id);
+    fn current_level_mut(&mut self) -> Result<&mut StackLvl, ResolveError> {
+        self.stack.last()
+            .and_then(|idx| self.memory.get_mut(idx))
+            .ok_or(ResolveError::EmptyStack)
     }
 
+    /// Iterates top to bottom through the resolver stack until a module boundary is crossed, or the
+    /// bottom of the stack is reached.
     fn rev_iter<F, A, R>(&self, f: F, a: A) -> Option<R>
-    where
-        F: Fn(&StackLvl) -> Option<R>,
-        A: Fn() -> Option<R>, {
+        where
+            F: Fn(&StackLvl) -> Option<R>,
+            A: Fn() -> Option<R>, {
 
         for lvl in self.stack.iter().rev()
             .filter_map(|idx| self.memory.get(idx)) {
@@ -210,201 +326,201 @@ impl NameResolver {
             if val.is_some() {
                 return val;
             }
+
+            // break if a module boundary is crossed, as the local namespace is only available
+            // within the scope of a single module.
+            if lvl.is_module {
+                break;
+            }
         }
         a()
     }
 
-    pub fn find_var(&self, name: &String) -> Option<LangTypeId> {
-        self.rev_iter(move |lvl| lvl.find_var(name).cloned(), || None)
-    }
-
-    pub fn find_struct(&self, name: &TypeName) -> Option<LangTypeId> {
-        // check if the **last** parameter is a struct
-        if name.len() == 1 {
-            if let Some(val) = self.rev_iter(move |lvl| {
-                let tmp = lvl.find_struct(name).cloned()?;
-                let tmp = lvl.get_struct(&tmp)?;
-                Some(tmp.id)
-            }, || None) {
-                return Some(val);
-            }
-        }
-
-        // check if the **second to last** parameter is an enum and if the **last** parameter is
-        // a variant of this enum
-        // if name.len() == 2 {
-        //     if let Some(val) = self.rev_iter(move |lvl| {
-        //         let tmp = lvl.find_struct(name.first().unwrap()).cloned()?;
-        //         let tmp = lvl.get_struct(&tmp)?;
-        //         if tmp.ty == StructType::Union() {
-        //             Some(tmp.id)
-        //         } else {
-        //             None
-        //         }
-        //     }, || None) {
-        //         return Some(val);
-        //     }
-        // }
-
-        // recursively resolve other paths in scope (todo)
-        None
-    }
-
-    pub fn find_fn(&self, name: &TypeName) -> Option<LangTypeId> {
-        // check if there is more than one name
-        if name.len() == 1 {
-            self.rev_iter(move |lvl| lvl
-                .find_fn(name).cloned(), || None)
-        } else {
-            unimplemented!()
-        }
-    }
-
-    pub fn push_var(&mut self, name: String, src: SrcPos) -> Result<(), ResolveError> {
-        if let Some(lvl) = self.stack.last()
-            .map(|idx| self.memory.get_mut(idx)).flatten() {
-
-            lvl.push_var(name, src);
-            Ok(())
-        } else {
-            Err(ResolveError::EmptyStack)
-        }
-    }
-
-    pub fn push_fn(&mut self, sig: FuncSignature, src: SrcPos) -> Result<(), ResolveError> {
-        if let Some(lvl) = self.stack.last()
-            .map(|idx| self.memory.get_mut(idx)).flatten() {
-
-            lvl.push_fn(sig, src)
-        } else {
-            Err(ResolveError::EmptyStack)
-        }
-    }
-
-    pub fn push_struct(&mut self, name: TypeName, src: SrcPos) -> Result<(), ResolveError> {
-        if let Some(lvl) = self.stack.last()
-            .map(|idx| self.memory.get_mut(idx)).flatten() {
-
-            lvl.push_struct(name, src)
-        } else {
-            Err(ResolveError::EmptyStack)
-        }
-    }
-
-    pub fn push_alias(&mut self, name: TypeName, src: SrcPos) -> Result<(), ResolveError> {
-        todo!()
+    pub fn pop(&mut self) {
+        self.stack.pop();
     }
 }
 
-impl StackLvl {
-    pub fn new(id: ScopeId) -> Self {
-        StackLvl {
-            struct_names: HashMap::new(),
-            structs: HashMap::new(),
 
-            variable_names: HashMap::new(),
-            variables: HashMap::new(),
 
-            fn_names: HashMap::new(),
-            fns: HashMap::new(),
+pub struct TopLevelNameResolver {
+    stack: Stack,
+    namespace: Namespace<Item>,
+}
 
-            methods: HashMap::new(),
-            id,
-        }
-    }
-
-    pub fn find_var(&self, name: &String) -> Option<&LangTypeId> {
-        self.variable_names.get(name)
-    }
-
-    pub fn get_var(&self, id: &LangTypeId) -> Option<&VarDef> {
-        self.variables.get(id)
-    }
-
-    pub fn find_struct(&self, name: &TypeName) -> Option<&LangTypeId> {
-        self.struct_names.get(&name.first().unwrap().name)
-    }
-
-    pub fn get_struct(&self, id: &LangTypeId) -> Option<&StructDef> {
-        self.structs.get(id)
-    }
-
-    pub fn find_fn(&self, name: &TypeName) -> Option<&LangTypeId> {
-        self.fn_names.get(&name.first().unwrap().name)
-    }
-
-    pub fn get_fn(&self, id: &LangTypeId) -> Option<&FnDef> {
-        self.fns.get(id)
-    }
-
-    pub fn push_var(&mut self, name: String, src: SrcPos) {
-        // find new variable id
-        let mut id = LangTypeId::rand();
-        while self.variables.contains_key(&id) {
-            id = LangTypeId::rand();
-        }
-        self.variables.insert(id, VarDef {
-            id,
-            name: name.clone(),
-            pos: src,
-        });
-
-        // insert name definition
-        let entry = self.variable_names.entry(name);
-        *entry.or_insert(id) = id;
-    }
-
-    pub fn push_fn(&mut self, sig: FuncSignature, src: SrcPos) -> Result<(), ResolveError> {
-        // register type
-        let id = TypeRegistry::global().add_signature(sig.clone())
-            .ok_or(ResolveError::TypeRegistry(
-                Rc::new(sig.clone()), src))?;
-
-        let def = FnDef {
-            id,
-            sig: sig.clone(),
-            pos: src,
+impl TopLevelNameResolver {
+    pub fn new() -> Self {
+        let resolver = TopLevelNameResolver {
+            stack: Stack::new(),
+            namespace: Namespace::new("".to_string()),
         };
-
-        if let Some(name) = &sig.name {
-            // see if function is already registered
-            if self.fn_names.get(name).is_some() {
-                return Err(ResolveError::FunctionRedefinition(Box::new(def), src))
-            }
-
-            // insert fn definition
-            self.fns.insert(id, def);
-
-            // insert name definition
-            let entry = self.fn_names.entry(name.clone());
-            *entry.or_insert(id) = id;
-        }
-        Ok(())
+        resolver
     }
 
-    pub fn push_struct(&mut self, name: TypeName, src: SrcPos) -> Result<(), ResolveError> {
+    pub fn current_scope(&self) -> Result<&ScopeId, ResolveError> {
+        self.stack.current_scope()
+    }
+
+    pub fn revert_to_scope(&mut self, scope: &ScopeId) {
+        self.stack.revert_to_scope(scope);
+    }
+
+    pub fn pop(&mut self) {
+        self.stack.pop();
+    }
+
+
+    /// Pushes a new stack level to the resolver.
+    /// Each stack level contains its own namepsace.
+    /// Thus, a stack level in this context is a namespace in the code.
+    /// This can be any named item, except for functions:
+    ///
+    /// - modules,
+    /// - traits
+    /// - types (structs, enums, type alias)
+    pub fn push(&mut self, namespace_name: Option<String>, is_module: bool) {
+        // find new id
+        let mut id = ScopeId::rand();
+        while self.stack.memory.contains_key(&id) {
+            id = ScopeId::rand();
+        }
+        // create new namespace name by appending the name of the namespace to the name of the
+        // last namespace
+        let mut name = if self.stack.stack.len() > 1 {
+            if let Some(top) = self.stack.stack.last()
+                .and_then(|id| self.stack.memory.get(id)) {
+                top.imports.base_namespace.clone()
+            } else {
+                QualifierName::empty()
+            }
+        } else {
+            QualifierName::empty()
+        };
+        // append namespace name to the base name
+        if let Some(namespace_name) = namespace_name {
+            name.push(namespace_name);
+        }
+
+        // push new resolve level
+        self.stack.stack.push(id);
+        self.stack.memory.insert(id, StackLvl::new(id, name, self.stack.stack.clone(), is_module));
+    }
+
+    /// Searches the levels of the resolver stack top to bottom and tries to resolve the item.
+    pub fn find_item(&self, name: &TypeName) -> Option<&Item> {
+        let TopLevelNameResolver {
+            stack,
+            namespace,
+            ..
+        } = self;
+
+        stack.rev_iter(move |lvl| {
+            lvl.find_item(name, namespace)
+        }, || None)
+    }
+
+    pub fn find_top_level_type(&self, name: &TypeName) -> Option<LangTypeId> {
+        // go through levels from top to bottom and try to resolve the reference to the item
+        if let Some(Item { type_id, variant: ItemVariant::Type }) = self.find_item(name) {
+            Some(*type_id)
+        } else {
+            None
+        }
+    }
+
+    pub fn find_trait(&self, name: &TypeName) -> Option<LangTypeId> {
+        // go through levels from top to bottom and try to resolve the reference to the item
+        if let Some(Item { type_id, variant: ItemVariant::Trait }) = self.find_item(name) {
+            Some(*type_id)
+        } else {
+            None
+        }
+    }
+
+    pub fn find_top_level_function(&self, name: &TypeName) -> Option<LangTypeId> {
+        // go through levels from top to bottom and try to resolve the reference to the item
+        if let Some(Item { type_id, variant: ItemVariant::Function }) = self.find_item(name) {
+            Some(*type_id)
+        } else {
+            None
+        }
+    }
+
+    /// Pushes top-level items to the namespace hierarchy of the namespace resolver.
+    /// This includes:
+    ///
+    /// - Types,
+    /// - Traits,
+    /// - top-level Functions,
+    /// - top-level Constants
+    pub fn push_top_level_item(
+        &mut self,
+        name: String,
+        src: SrcPos,
+        variant: ItemVariant
+    ) -> Result<(), ResolveError> {
         // register type
         let id = TypeRegistry::global().add_empty()
             .ok_or(ResolveError::EmptyTypeRegistry(src))?;
 
-        // todo: fix nested name spaces
-        let simple_name = name.last().unwrap().clone().name;
-        let def = StructDef {
-            id,
-            name: simple_name.clone(),
-            pos: src
-        };
-        if self.struct_names.contains_key(&simple_name) {
-            return Err(ResolveError::StructRedefinition(Box::new(def), src));
-        }
+        // form fully qualified name
+        let level = self.stack.current_level()?;
+        let mut full_name = level.imports.base_namespace.clone();
+        full_name.push(name);
 
-        // insert struct definition
-        self.structs.insert(id, def);
-
-        // insert name definition
-        let entry = self.struct_names.entry(simple_name);
-        *entry.or_insert(id) = id;
+        self.namespace.insert_item(&full_name, Item { type_id: id, variant });
         Ok(())
+    }
+
+    /// Adds a `use` statement to the current stack
+    pub fn push_use(&mut self, name: QualifierName) -> Result<(), ResolveError> {
+        let TopLevelNameResolver {
+            stack,
+            namespace,
+            ..
+        } = self;
+
+        let lvl = stack.current_level_mut()?;
+        lvl.imports.insert_namespace(&namespace, name)
+    }
+}
+
+impl StackLvl {
+    pub fn new(
+        id: ScopeId,
+        base_module: QualifierName,
+        stack: Vec<ScopeId>,
+        is_module: bool,
+        self_type: Option<QualifierName>
+    ) -> Self {
+        StackLvl {
+            id,
+            imports: Imports::new(base_module),
+            stack,
+            is_module,
+            items: Namespace::new("".to_string()),
+            self_type,
+        }
+    }
+
+    pub fn find_item<'a>(&self, name: &TypeName, namespace: &'a Namespace<Item>) -> Option<&'a Item> {
+        let path: QualifierName = name.clone().into();
+        let mut iter = path.iter();
+        match iter.next() {
+            Some(first) if first == "Self" => {
+                // check if there is more
+                if let Some(latter) = iter.next() {
+                    // collect latter & check
+
+
+                    todo!()
+                } else {
+                    // return the base type of the stack lvl
+                    self.imports.self_type(namespace)
+                }
+            },
+            _ => self.imports.resolve_type(&path, namespace)
+        }
     }
 }
 

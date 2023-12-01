@@ -1,5 +1,5 @@
 use std::fmt::{Display, Formatter};
-use std::ops::{Deref, DerefMut};
+use std::ops::{Add, AddAssign, Deref, DerefMut};
 use crate::parser::ast::Parsable;
 use crate::parser::{expect_token, local, ParseError, Parser};
 use crate::lexer::*;
@@ -7,6 +7,74 @@ use crate::parser::ast::expression::{AstExpression, AstTyped};
 use crate::parser::r#type::{Lifetime, Type};
 use crate::parser::r#type::core::{CORE_F32, CORE_F64, CORE_I16, CORE_I32, CORE_I64, CORE_I8, CORE_ISIZE, CORE_U16, CORE_U32, CORE_U64, CORE_U8, CORE_USIZE};
 
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct QualifierName {
+    path: Vec<String>,
+}
+
+impl Display for QualifierName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut iter = self.path.iter();
+        if let Some(item) = iter.next() {
+            write!(f, "{item}")?;
+            for item in iter {
+                write!(f, "::{item}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl QualifierName {
+    pub fn empty() -> Self {
+        QualifierName {
+            path: Vec::new(),
+        }
+    }
+}
+
+impl From<Vec<String>> for QualifierName {
+    fn from(value: Vec<String>) -> Self {
+        QualifierName {
+            path: value,
+        }
+    }
+}
+
+impl From<&TypeName> for QualifierName {
+    fn from(value: &TypeName) -> Self {
+        QualifierName {
+            path: value.iter()
+                .map(|entry| entry.name.clone())
+                .collect()
+        }
+    }
+}
+
+impl From<TypeName> for QualifierName {
+    fn from(value: TypeName) -> Self {
+        QualifierName {
+            path: value.path.into_iter()
+                .map(|entry| entry.name)
+                .collect()
+        }
+    }
+}
+
+impl Deref for QualifierName {
+    type Target = Vec<String>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+impl DerefMut for QualifierName {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.path
+    }
+}
 
 
 #[derive(Clone, Debug, PartialEq)]
@@ -27,7 +95,49 @@ pub struct ParameterList {
     params: Vec<AstType>,
 }
 
+impl From<TypeNameEntry> for TypeName {
+    fn from(value: TypeNameEntry) -> Self {
+        TypeName {
+            path: vec![value]
+        }
+    }
+}
+
+pub struct TypeNameIter<'a> {
+    name: &'a TypeName,
+    idx: usize,
+}
+
+impl<'a> TypeNameIter<'a> {
+    /// Returns true of the type name iterator is exhausted.
+    pub fn is_empty(&self) -> bool {
+        self.name.path.len() <= self.idx
+    }
+}
+
+impl<'a> Iterator for TypeNameIter<'a> {
+    type Item = &'a TypeNameEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx < self.name.path.len() {
+            let tmp = &self.name.path[self.idx];
+            self.idx += 1;
+            Some(tmp)
+        } else {
+            None
+        }
+    }
+}
+
 impl TypeName {
+    /// Returns an iterator for the entries in the type name
+    pub fn iter(&self) -> TypeNameIter {
+        TypeNameIter {
+            name: self,
+            idx: 0,
+        }
+    }
+
     pub fn parse_with_string(name: String, parser: &mut Parser, require_colon: bool) -> Result<Self, ParseError> {
         Self::parse_from_first(
             TypeNameEntry::parse_from_name(name, parser, require_colon)?,
@@ -262,6 +372,25 @@ impl From<String> for TypeNameEntry {
     }
 }
 
+
+impl Add<Self> for TypeName {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        let mut out = self.clone();
+        out += rhs;
+        out
+    }
+}
+
+impl AddAssign<Self> for TypeName {
+    fn add_assign(&mut self, mut rhs: Self) {
+        self.path.append(&mut rhs.path)
+    }
+}
+
+
+
 impl Deref for TypeName {
     type Target = Vec<TypeNameEntry>;
 
@@ -359,7 +488,7 @@ impl AstType {
         let scope = *parser.env.current_scope()?;
         match self {
             AstType::Base(name) => {
-                let s = parser.env.find_struct(&name)
+                let s = parser.env.find_top_level_type(&name)
                     .ok_or(ParseError::UnknownTypeName(
                         name.clone(),
                         format!("Could not find type with name '{name}' \

@@ -106,7 +106,7 @@ impl AstExpression {
                 if ident == "false" || ident == "true" => AstBoolLiteral::parse(parser),
             Ok(local!(Token::Ident(_))) => {
                 let x = AstNameExpr::parse(parser)?;
-                if parser.env.find_struct(&x).is_some() {
+                if parser.env.find_top_level_type(&x).is_some() {
                     match parser.peak() {
                         Ok(local!(Token::Punct(Punct::BraceOpen | Punct::BracketOpen))) => {
                             AstInit::parse_lhs(parser, x.into())

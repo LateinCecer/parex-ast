@@ -96,7 +96,7 @@ impl AstPattern {
             Ok(SrcToken { token: Token::Ident(_), pos }) => {
                 let pos = *pos;
                 let x = AstNameExpr::parse(parser)?;
-                if parser.env.find_struct(&x).is_some() {
+                if parser.env.find_top_level_type(&x).is_some() {
                     match parser.peak() {
                         Ok(local!(Token::Punct(Punct::BracketOpen | Punct::BraceOpen))) => {
                             Self::parse_init(parser, x.into())
@@ -258,29 +258,32 @@ mod test {
     use crate::lexer::SrcPos;
     use crate::parser::{ParseError, Parser};
     use crate::parser::ast::ast_pattern_matching::AstPattern;
-    use crate::parser::ast::ast_type::TypeName;
     use crate::parser::ast::Parsable;
+    use crate::parser::resolver::ItemVariant;
 
     #[test]
     fn test_parser() -> Result<(), ParseError> {
         let src = r#"
-Some(1 | 3 | 5)
-MyData { expl: "hello, world!", c: 'a', }
+test::Some(1 | 3 | 5)
+test::MyData { expl: "hello, world!", c: 'a', }
 None =
         "#;
         let mut parser = Parser::new(src);
-        parser.env.push();
-        parser.env.push_struct(
-            TypeName::from(vec!["Option".to_string(), "Some".to_string()]),
-            SrcPos::default()
+        parser.env.push(Some("test".to_string()), true);
+        parser.env.push_top_level_item(
+            "Some".to_string(),
+            SrcPos::default(),
+            ItemVariant::Type,
         )?;
-        parser.env.push_struct(
-            TypeName::from(vec!["Option".to_string(), "None".to_string()]),
-            SrcPos::default()
+        parser.env.push_top_level_item(
+            "None".to_string(),
+            SrcPos::default(),
+            ItemVariant::Type,
         )?;
-        parser.env.push_struct(
-            TypeName::from(vec!["MyData".to_string()]),
-            SrcPos::default()
+        parser.env.push_top_level_item(
+            "MyData".to_string(),
+            SrcPos::default(),
+            ItemVariant::Type,
         )?;
 
         let pattern = AstPattern::parse(&mut parser)?;

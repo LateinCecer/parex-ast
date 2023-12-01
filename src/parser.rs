@@ -81,7 +81,7 @@ pub struct Parser<'a> {
     src: &'a str,
     lexer: Lexer<'a>,
     current: Result<SrcToken, LexError>,
-    pub env: NameResolver,
+    pub env: TopLevelNameResolver,
 }
 
 
@@ -201,7 +201,7 @@ pub (crate) use expect_token;
 use crate::parser::ast::ast_type::TypeName;
 use crate::parser::ast::expression::AstExpression;
 use crate::parser::r#type::TypeError;
-use crate::parser::resolver::{NameResolver, ResolveError};
+use crate::parser::resolver::{TopLevelNameResolver, ResolveError};
 
 
 
@@ -245,7 +245,7 @@ impl<'a> Parser<'a> {
             src,
             lexer: Lexer::new(src),
             current: Err(LexError::EndOfStream(SrcPos::default())),
-            env: NameResolver::new(),
+            env: TopLevelNameResolver::new(),
         };
         let _ = parser.next();
         parser
