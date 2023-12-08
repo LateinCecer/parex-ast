@@ -5,6 +5,7 @@ use crate::parser::ast::ast_type::AstType;
 use crate::parser::ast::Parsable;
 use crate::parser::parameter_env::ParameterEnv;
 use crate::parser::{expect_token, local, ParseError, Parser};
+use crate::parser::resolver::ItemVariant;
 
 
 #[derive(Debug, Clone)]
@@ -20,6 +21,40 @@ pub struct AstTypeDef {
     pos: SrcPos,
     env: ParameterEnv,
     var: AstTypeVariant,
+}
+
+impl AstTypeVariant {
+    pub fn push_to_env(&self, parser: &mut Parser, name: String, pos: SrcPos) -> Result<(), ParseError> {
+        match &self {
+            AstTypeVariant::Struct(s) => {
+                parser.env.push_top_level_item(name, pos, ItemVariant::Type)?;
+            }
+            AstTypeVariant::Enum(e) => {
+                let scope = parser.env.push_top_level_item(
+                    name, pos, ItemVariant::Type,
+                )?;
+                parser.env.revert_to_scope(&scope);
+                for var in e.variants.iter() {
+                    parser.env.push_top_level_item(
+                        var.name.clone(),
+                        var.pos,
+                        ItemVariant::Type,
+                    )?;
+                }
+                parser.env.pop();
+            }
+            AstTypeVariant::Alias(a) => {
+                parser.env.push_top_level_item(name, pos, ItemVariant::Type)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl AstTypeDef {
+    pub fn push_to_env(&self, parser: &mut Parser) -> Result<(), ParseError> {
+        self.var.push_to_env(parser, self.name.clone(), self.pos)
+    }
 }
 
 impl Parsable for AstTypeVariant {

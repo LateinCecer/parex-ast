@@ -5,7 +5,7 @@ use crate::parser::{expect_token, local, ParseError, Parser};
 use crate::parser::ast::array_index::AstArrayIndex;
 use crate::parser::ast::array_init::AstArrayInit;
 use crate::parser::ast::as_expr::AsExpr;
-use crate::parser::ast::ast_type::AstType;
+use crate::parser::ast::ast_type::{AstType, QualifierName};
 use crate::parser::ast::binary::AstBinaryExpr;
 use crate::parser::ast::block::AstBlock;
 use crate::parser::ast::break_expr::AstBreak;
@@ -106,7 +106,8 @@ impl AstExpression {
                 if ident == "false" || ident == "true" => AstBoolLiteral::parse(parser),
             Ok(local!(Token::Ident(_))) => {
                 let x = AstNameExpr::parse(parser)?;
-                if parser.env.find_top_level_type(&x).is_some() {
+                let qual_name: QualifierName = x.names.clone().into();
+                if parser.env.find_top_level_type(&qual_name).is_some() {
                     match parser.peak() {
                         Ok(local!(Token::Punct(Punct::BraceOpen | Punct::BracketOpen))) => {
                             AstInit::parse_lhs(parser, x.into())

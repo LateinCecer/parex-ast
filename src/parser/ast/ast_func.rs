@@ -5,6 +5,7 @@ use crate::parser::{expect_token, local, ParseError, Parser};
 use crate::parser::ast::ast_type::{AstType};
 use crate::parser::ast::block::AstBlock;
 use crate::parser::parameter_env::ParameterEnv;
+use crate::parser::resolver::ItemVariant;
 
 
 #[derive(Debug, Clone)]
@@ -42,6 +43,13 @@ pub struct AstFunc {
     body: AstBlock,
 }
 
+impl AstFuncSignature {
+    pub fn push_to_env(&self, parser: &mut Parser) {
+        parser.env.push_fn(self.name.clone());
+        parser.env.pop();
+    }
+}
+
 
 impl Receiver {
     fn pos(&self) -> &SrcPos {
@@ -59,13 +67,20 @@ impl Parsable for AstFunc {
 
     fn parse(parser: &mut Parser) -> Result<Self::Output, ParseError> {
         let head = AstFuncSignature::parse(parser)?;
+        // push the signature to the parser environment
+        let scope = parser.env.push_top_level_item(head.name.clone(), head.pos, ItemVariant::Function)?;
+        parser.env.revert_to_scope(&scope);
+
         let body = AstBlock::parse(parser)?;
+        parser.env.pop();
+
         Ok(AstFunc {
             sig: head,
             body,
         })
     }
 }
+
 
 impl Display for AstFunc {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

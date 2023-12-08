@@ -42,6 +42,22 @@ impl From<Vec<String>> for QualifierName {
     }
 }
 
+impl From<&String> for QualifierName {
+    fn from(value: &String) -> Self {
+        QualifierName {
+            path: vec![value.clone()],
+        }
+    }
+}
+
+impl From<String> for QualifierName {
+    fn from(value: String) -> Self {
+        QualifierName {
+            path: vec![value],
+        }
+    }
+}
+
 impl From<&TypeName> for QualifierName {
     fn from(value: &TypeName) -> Self {
         QualifierName {
@@ -488,7 +504,7 @@ impl AstType {
         let scope = *parser.env.current_scope()?;
         match self {
             AstType::Base(name) => {
-                let s = parser.env.find_top_level_type(&name)
+                let s = parser.env.find_top_level_type(&name.clone().into())
                     .ok_or(ParseError::UnknownTypeName(
                         name.clone(),
                         format!("Could not find type with name '{name}' \

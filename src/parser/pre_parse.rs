@@ -246,7 +246,7 @@ impl Parsable for PreTrait {
 impl PreModule {
 
     fn parse(parser: &mut Parser, name: String) -> Result<Self, ParseError> {
-        parser.env.push(Some(name), true);
+        parser.env.push_module(name);
 
         let mut types = Vec::new();
         let mut impls= Vec::new();
@@ -294,9 +294,9 @@ impl PreModule {
             uses,
             stack_level: parser.env.current_scope()?.clone(),
         };
-        module.push_structures(parser)?;
-        module.push_funcs(parser)?;
+        module.push_types(parser)?;
         module.push_traits(parser)?;
+        module.push_use(parser)?;
 
         // pop out of the current stack level
         parser.env.pop();
@@ -306,7 +306,7 @@ impl PreModule {
 
 impl PreModule {
     /// Pushes types to the namespace structure of the parser
-    pub fn push_structures(&self, parser: &mut Parser) -> Result<(), ParseError> {
+    pub fn push_types(&self, parser: &mut Parser) -> Result<(), ParseError> {
         // push structs
         for s in self.types.iter() {
             match &s.var {
@@ -314,8 +314,9 @@ impl PreModule {
                     parser.env.push_top_level_item(s.name.clone(), s.pos, ItemVariant::Type)?;
                 }
                 PreTypeVariant::Enum(vars) => {
-                    parser.env.push_top_level_item(s.name.clone(), s.pos, ItemVariant::Type)?;
-                    parser.env.push(Some(s.name.clone()), false);
+                    let scope = parser.env.push_top_level_item(
+                        s.name.clone(), s.pos, ItemVariant::Type)?;
+                    parser.env.revert_to_scope(&scope);
                     for var in vars.iter() {
                         parser.env.push_top_level_item(
                             var.clone(),
@@ -342,15 +343,6 @@ impl PreModule {
         Ok(())
     }
 
-    /// Pushes **top-level** functions to the namespace structure of the parser.
-    pub fn push_funcs(&self, parser: &mut Parser) -> Result<(), ParseError> {
-        // push funcs
-        for f in self.funcs.iter() {
-            parser.env.push_top_level_item(f.name.clone(), f.pos, ItemVariant::Function)?;
-        }
-        Ok(())
-    }
-
     pub fn push_use(&self, parser: &mut Parser) -> Result<(), ParseError> {
         // push uses
         for u in self.uses.iter() {
@@ -358,6 +350,8 @@ impl PreModule {
         }
         Ok(())
     }
+
+
 
     /// Parses all structs in the pre-module to proper `AstStruct`s and collects the result into
     /// a `Vec`.
@@ -459,9 +453,9 @@ mod test {
         // parse structs
         parser.env.revert_to_scope(&module.stack_level);
         let types = module.parse_types(&mut parser)?;
+        let traits = module.parse_traits(&mut parser)?;
         let funcs = module.parse_funcs(&mut parser)?;
         let impls = module.parse_impl(&mut parser)?;
-        let traits = module.parse_traits(&mut parser)?;
 
         println!("{:#?}", types);
         println!("{:#?}", funcs);

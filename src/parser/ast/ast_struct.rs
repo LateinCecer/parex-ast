@@ -21,15 +21,15 @@ struct AstStructMember {
 
 #[derive(Debug, Clone)]
 pub struct AstEnum {
-    pos: SrcPos,
-    variants: Vec<AstEnumVariant>,
+    pub pos: SrcPos,
+    pub variants: Vec<AstEnumVariant>,
 }
 
 
 #[derive(Debug, Clone)]
-struct AstEnumVariant {
-    pos: SrcPos,
-    name: String,
+pub struct AstEnumVariant {
+    pub pos: SrcPos,
+    pub name: String,
     members: Vec<AstStructMember>,
 }
 

@@ -6,6 +6,7 @@ use crate::parser::parameter_env::ParameterEnv;
 use crate::parser::{expect_token, local, ParseError, Parser};
 use crate::parser::ast::ast_func::AstFunc;
 use crate::parser::ast::ast_type_def::AstTypeVariant;
+use crate::parser::resolver::ItemVariant;
 
 
 #[derive(Debug, Clone)]
@@ -35,7 +36,18 @@ struct AstImplBody {
     types: Vec<AstAssociatedType>,
 }
 
+impl AstAssociatedTypeSig {
+    pub fn push_to_env(&self, parser: &mut Parser) -> Result<(), ParseError> {
+        parser.env.push_top_level_item(self.name.clone(), self.pos, ItemVariant::Function)?;
+        Ok(())
+    }
+}
 
+impl AstAssociatedType {
+    pub fn push_to_env(&self, parser: &mut Parser) -> Result<(), ParseError> {
+        self.var.push_to_env(parser, self.head.name.clone(), self.head.pos)
+    }
+}
 
 impl Parsable for AstAssociatedType {
     type Output = Self;
@@ -82,10 +94,13 @@ impl Parsable for AstImplBody {
             // try to parse either a function, or a type
             match parser.peak() {
                 Ok(local!(Token::Key(KeyWord::Fn))) => {
+                    // the function parser will push the env for the function automatically
                     funcs.push(AstFunc::parse(parser)?);
                 }
                 Ok(local!(Token::Key(KeyWord::Type))) => {
-                    types.push(AstAssociatedType::parse(parser)?);
+                    let ty = AstAssociatedType::parse(parser)?;
+                    ty.push_to_env(parser)?;
+                    types.push(ty);
                 },
                 Ok(local!(Token::Punct(Punct::Semicolon))) => {
                     parser.next()?;
@@ -128,8 +143,13 @@ impl Parsable for AstImpl {
         if let Ok(local!(Token::Key(KeyWord::Where))) = parser.peak() {
             env.parse_where(parser)?;
         }
+
+
+        // before parsing the body, change the scope to the item for which the body is implemented
+        parser.env.push_impl(ty.clone());
         // parse body
         let body = AstImplBody::parse(parser)?;
+        parser.env.pop();
 
         Ok(AstImpl {
             pos,

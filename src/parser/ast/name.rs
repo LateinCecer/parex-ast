@@ -7,7 +7,7 @@ use crate::parser::ast::expression::AstExpression;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AstNameExpr {
-    names: TypeName,
+    pub names: TypeName,
 }
 
 impl AstNameExpr {

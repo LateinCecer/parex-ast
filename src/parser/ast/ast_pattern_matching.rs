@@ -4,7 +4,7 @@ use crate::lexer::{Punct, SrcPos, SrcToken, Token};
 use crate::parser::ast::expression::AstExpression;
 use crate::parser::ast::Parsable;
 use crate::parser::{expect_token, local, ParseError, Parser};
-use crate::parser::ast::ast_type::AstType;
+use crate::parser::ast::ast_type::{AstType, QualifierName};
 use crate::parser::ast::literal::{AstBoolLiteral, AstCharLiteral, AstNumberLiteral, AstStringLiteral};
 use crate::parser::ast::name::AstNameExpr;
 
@@ -96,7 +96,8 @@ impl AstPattern {
             Ok(SrcToken { token: Token::Ident(_), pos }) => {
                 let pos = *pos;
                 let x = AstNameExpr::parse(parser)?;
-                if parser.env.find_top_level_type(&x).is_some() {
+                let qual_name: QualifierName = x.names.clone().into();
+                if parser.env.find_top_level_type(&qual_name).is_some() {
                     match parser.peak() {
                         Ok(local!(Token::Punct(Punct::BracketOpen | Punct::BraceOpen))) => {
                             Self::parse_init(parser, x.into())
@@ -269,7 +270,7 @@ test::MyData { expl: "hello, world!", c: 'a', }
 None =
         "#;
         let mut parser = Parser::new(src);
-        parser.env.push(Some("test".to_string()), true);
+        parser.env.push_module("test".to_string());
         parser.env.push_top_level_item(
             "Some".to_string(),
             SrcPos::default(),

@@ -6,7 +6,7 @@ use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 use rand::{Rng, thread_rng};
 use crate::lexer::SrcPos;
-use crate::parser::ast::ast_type::{QualifierName, TypeName};
+use crate::parser::ast::ast_type::{AstType, QualifierName};
 use crate::parser::func::FuncSignature;
 use crate::parser::r#type::{LangTypeId, Type, TypeRegistry, TypeSignature};
 use crate::parser::resolver::namespace::{Namespace};
@@ -14,82 +14,18 @@ use crate::parser::resolver::namespace::{Namespace};
 
 #[derive(Clone, Debug)]
 pub enum ResolveError {
-    StructRedefinition(Box<StructDef>, SrcPos),
-    FunctionRedefinition(Box<FnDef>, SrcPos),
+    ItemRedefinition(QualifierName, LangTypeId),
     TypeRegistry(Rc<dyn TypeSignature>, SrcPos),
     EmptyTypeRegistry(SrcPos),
     EmptyStack,
     InvalidUse(QualifierName),
+    UnknownItem(QualifierName),
     EmptyQualifierName,
 }
-
-impl PartialEq for ResolveError {
-    fn eq(&self, other: &Self) -> bool {
-        match self {
-            ResolveError::StructRedefinition(def, pos) => {
-                if let ResolveError::StructRedefinition(def_other, pos_other) = other {
-                    def == def_other && pos == pos_other
-                } else {
-                    false
-                }
-            }
-            ResolveError::FunctionRedefinition(def, pos) => {
-                if let ResolveError::FunctionRedefinition(def_other, pos_other) = other {
-                    def == def_other && pos == pos_other
-                } else {
-                    false
-                }
-            }
-            ResolveError::TypeRegistry(_, pos) => {
-                if let ResolveError::TypeRegistry(_, pos_other) = other {
-                    pos == pos_other
-                } else {
-                    false
-                }
-            }
-            ResolveError::EmptyTypeRegistry(pos) => {
-                if let ResolveError::EmptyTypeRegistry(pos_other) = other {
-                    pos == pos_other
-                } else {
-                    false
-                }
-            }
-            ResolveError::EmptyStack => {
-                if let ResolveError::EmptyStack = other {
-                    true
-                } else {
-                    false
-                }
-            }
-            ResolveError::InvalidUse(name) => {
-                if let ResolveError::InvalidUse(other_name) = other {
-                    name.clone() == other_name.clone()
-                } else {
-                    false
-                }
-            }
-            ResolveError::EmptyQualifierName => {
-                if let ResolveError::EmptyQualifierName = other {
-                    true
-                } else {
-                    false
-                }
-            }
-        }
-    }
-}
-
-impl Eq for ResolveError {}
 
 impl Display for ResolveError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            ResolveError::StructRedefinition(def, src) => {
-                write!(f, "Struct '{}' first defined at {} is redefined at {}", def.name, def.pos, src)
-            }
-            ResolveError::FunctionRedefinition(def, src) => {
-                write!(f, "Function '{}' first defined at {} is redefined at {}", def.sig, def.pos, src)
-            }
             ResolveError::TypeRegistry(sig, src) => {
                 write!(f, "Unable to register type signature '{sig}' defined at {src}")
             }
@@ -104,6 +40,12 @@ impl Display for ResolveError {
             }
             ResolveError::EmptyQualifierName => {
                 write!(f, "Empty qualifier name")
+            }
+            ResolveError::ItemRedefinition(name, ty) => {
+                write!(f, "Attempted to redefine type with id {ty:?} and name {name}")
+            }
+            ResolveError::UnknownItem(name) => {
+                write!(f, "Unknown item with name {name}")
             }
         }
     }
@@ -182,8 +124,8 @@ struct StackLvl {
     imports: Imports,
     stack: Vec<ScopeId>,
     is_module: bool,
+    self_type: Option<AstType>,
     items: Namespace<Item>,
-    self_type: Option<QualifierName>,
 }
 
 struct Imports {
@@ -199,13 +141,26 @@ impl Imports {
         }
     }
 
-    fn self_type<'a>(&self, namespace: &'a Namespace<Item>) -> Option<&'a Item> {
-        namespace.resolve(&self.base_namespace)
+    /// Resolves a local type based on the current scope
+    fn resolve_local<'a>(
+        &self,
+        path: &QualifierName,
+        namespace: &'a Namespace<Item>
+    ) -> Option<&'a Item> {
+        let mut qualifier_name = self.base_namespace.clone();
+        for next in path.iter() {
+            qualifier_name.push(next.clone());
+        }
+        namespace.resolve(&qualifier_name)
     }
 
     /// Resolves a qualifier path to an item using the specified namespace hierarchy and local
     /// imports / `use` statements.
-    fn resolve_type<'a>(&self, path: &QualifierName, namespace: &'a Namespace<Item>) -> Option<&'a Item> {
+    fn resolve_type<'a>(
+        &self,
+        path: &QualifierName,
+        namespace: &'a Namespace<Item>
+    ) -> Option<&'a Item> {
         if let Some(first) = path.first() {
             // look for first entry in imported namespaces and filter from there
             if let Some(search_path) = self.namespaces.get(first) {
@@ -245,7 +200,11 @@ impl Imports {
     /// ``
     /// use path::to::lib;
     /// ``
-    fn insert_namespace(&mut self, namespace: &Namespace<Item>, path: QualifierName) -> Result<(), ResolveError> {
+    fn insert_namespace(
+        &mut self,
+        namespace: &Namespace<Item>,
+        path: QualifierName
+    ) -> Result<(), ResolveError> {
         if let Some(last) = path.last() {
             let last = last.to_owned();
             // check if the path leads to a namespace
@@ -263,10 +222,13 @@ impl Imports {
 
 
 pub struct Item {
-    type_id: LangTypeId,
-    variant: ItemVariant,
+    pub type_id: LangTypeId,
+    pub scope: ScopeId,
+    pub variant: ItemVariant,
 }
 
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum ItemVariant {
     Type,
     Function,
@@ -369,6 +331,31 @@ impl TopLevelNameResolver {
         self.stack.pop();
     }
 
+    /// Changes the current scope of the resolver to the specified path.
+    /// If the path does not exist in the resolver, an error is returned.
+    pub fn scope_to_path(&mut self, path: &QualifierName) -> Result<(), ResolveError> {
+        let item = self.find_item(path)
+            .ok_or(ResolveError::InvalidUse(path.clone()))?;
+        let scope = item.scope.clone();
+        self.revert_to_scope(&scope);
+        Ok(())
+    }
+
+    pub fn push_module(&mut self, name: String) {
+        self.push(Some(name), true, None);
+    }
+
+    pub fn push_type(&mut self, name: String) {
+        self.push(Some(name.clone()), false, Some(AstType::Base(name.into())));
+    }
+
+    pub fn push_fn(&mut self, name: String) {
+        self.push(Some(name), false, None);
+    }
+
+    pub fn push_impl(&mut self, ty_name: AstType) {
+        self.push(None, false, Some(ty_name));
+    }
 
     /// Pushes a new stack level to the resolver.
     /// Each stack level contains its own namepsace.
@@ -378,7 +365,12 @@ impl TopLevelNameResolver {
     /// - modules,
     /// - traits
     /// - types (structs, enums, type alias)
-    pub fn push(&mut self, namespace_name: Option<String>, is_module: bool) {
+    fn push(
+        &mut self,
+        namespace_name: Option<String>,
+        is_module: bool,
+        self_type: Option<AstType>
+    ) {
         // find new id
         let mut id = ScopeId::rand();
         while self.stack.memory.contains_key(&id) {
@@ -403,11 +395,14 @@ impl TopLevelNameResolver {
 
         // push new resolve level
         self.stack.stack.push(id);
-        self.stack.memory.insert(id, StackLvl::new(id, name, self.stack.stack.clone(), is_module));
+        self.stack.memory.insert(
+            id,
+            StackLvl::new(id, name, self.stack.stack.clone(), is_module, self_type)
+        );
     }
 
     /// Searches the levels of the resolver stack top to bottom and tries to resolve the item.
-    pub fn find_item(&self, name: &TypeName) -> Option<&Item> {
+    pub fn find_item(&self, name: &QualifierName) -> Option<&Item> {
         let TopLevelNameResolver {
             stack,
             namespace,
@@ -419,27 +414,38 @@ impl TopLevelNameResolver {
         }, || None)
     }
 
-    pub fn find_top_level_type(&self, name: &TypeName) -> Option<LangTypeId> {
+    pub fn find_local_item(&self, name: &QualifierName) -> Option<&Item> {
+        let TopLevelNameResolver {
+            stack,
+            namespace,
+            ..
+        } = self;
+
+        let lvl = stack.current_level().ok()?;
+        lvl.find_local_item(name, &namespace)
+    }
+
+    pub fn find_top_level_type(&self, name: &QualifierName) -> Option<LangTypeId> {
         // go through levels from top to bottom and try to resolve the reference to the item
-        if let Some(Item { type_id, variant: ItemVariant::Type }) = self.find_item(name) {
+        if let Some(Item { type_id, variant: ItemVariant::Type, .. }) = self.find_item(name) {
             Some(*type_id)
         } else {
             None
         }
     }
 
-    pub fn find_trait(&self, name: &TypeName) -> Option<LangTypeId> {
+    pub fn find_trait(&self, name: &QualifierName) -> Option<LangTypeId> {
         // go through levels from top to bottom and try to resolve the reference to the item
-        if let Some(Item { type_id, variant: ItemVariant::Trait }) = self.find_item(name) {
+        if let Some(Item { type_id, variant: ItemVariant::Trait, .. }) = self.find_item(name) {
             Some(*type_id)
         } else {
             None
         }
     }
 
-    pub fn find_top_level_function(&self, name: &TypeName) -> Option<LangTypeId> {
+    pub fn find_top_level_function(&self, name: &QualifierName) -> Option<LangTypeId> {
         // go through levels from top to bottom and try to resolve the reference to the item
-        if let Some(Item { type_id, variant: ItemVariant::Function }) = self.find_item(name) {
+        if let Some(Item { type_id, variant: ItemVariant::Function, .. }) = self.find_item(name) {
             Some(*type_id)
         } else {
             None
@@ -458,7 +464,12 @@ impl TopLevelNameResolver {
         name: String,
         src: SrcPos,
         variant: ItemVariant
-    ) -> Result<(), ResolveError> {
+    ) -> Result<ScopeId, ResolveError> {
+        // check if the item is already available in the scope
+        if let Some(item) = self.find_item(&name.clone().into()) {
+            return Err(ResolveError::ItemRedefinition(name.into(), item.type_id));
+        }
+
         // register type
         let id = TypeRegistry::global().add_empty()
             .ok_or(ResolveError::EmptyTypeRegistry(src))?;
@@ -466,10 +477,20 @@ impl TopLevelNameResolver {
         // form fully qualified name
         let level = self.stack.current_level()?;
         let mut full_name = level.imports.base_namespace.clone();
-        full_name.push(name);
+        full_name.push(name.clone());
 
-        self.namespace.insert_item(&full_name, Item { type_id: id, variant });
-        Ok(())
+        // push now stack entry for that item onto the stack
+        match &variant {
+            ItemVariant::Type | ItemVariant::Trait => self.push_type(name),
+            ItemVariant::Function => self.push_fn(name),
+            ItemVariant::Const => self.push_fn(name), // treat constants as comp-time functions for now
+        }
+        let scope_id = self.stack.current_scope()?.clone();
+        self.pop();
+
+        // insert item into the namespace hierarchy
+        self.namespace.insert_item(&full_name, Item { type_id: id, variant, scope: scope_id });
+        Ok(scope_id)
     }
 
     /// Adds a `use` statement to the current stack
@@ -491,32 +512,57 @@ impl StackLvl {
         base_module: QualifierName,
         stack: Vec<ScopeId>,
         is_module: bool,
-        self_type: Option<QualifierName>
+        self_type: Option<AstType>,
     ) -> Self {
         StackLvl {
             id,
             imports: Imports::new(base_module),
             stack,
             is_module,
-            items: Namespace::new("".to_string()),
             self_type,
+            items: Namespace::new("".to_string()),
         }
     }
 
-    pub fn find_item<'a>(&self, name: &TypeName, namespace: &'a Namespace<Item>) -> Option<&'a Item> {
-        let path: QualifierName = name.clone().into();
+    fn find_self_type(&self) -> Option<QualifierName> {
+        let ty = self.self_type.as_ref()?;
+        match ty {
+            AstType::Base(base) => {
+                let name: QualifierName = base.into();
+                Some(name)
+            }
+            AstType::Ptr(_) => None,
+            AstType::MutPtr(_) => None,
+            AstType::Array(_, _) => None,
+            AstType::Slice(_) => None,
+        }
+    }
+
+    fn find_local_item<'a>(&self, name: &QualifierName, namespace: &'a Namespace<Item>) -> Option<&'a Item> {
+        self.imports.resolve_local(name, namespace)
+    }
+
+    fn find_item<'a>(&self, name: &QualifierName, namespace: &'a Namespace<Item>) -> Option<&'a Item> {
+        let path: QualifierName = name.clone();
         let mut iter = path.iter();
         match iter.next() {
             Some(first) if first == "Self" => {
+                let self_ty = self.find_self_type()?;
+
                 // check if there is more
                 if let Some(latter) = iter.next() {
                     // collect latter & check
+                    let mut path = self_ty;
+                    path.push(latter.clone());
+                    for i in iter {
+                        path.push(i.clone());
+                    }
 
-
-                    todo!()
+                    // now look in the namespace tree
+                    namespace.resolve(&path)
                 } else {
                     // return the base type of the stack lvl
-                    self.imports.self_type(namespace)
+                    self.imports.resolve_type(&self_ty, namespace)
                 }
             },
             _ => self.imports.resolve_type(&path, namespace)

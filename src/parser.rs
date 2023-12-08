@@ -11,7 +11,7 @@ use std::mem;
 use crate::lexer::{Lexer, LexError, Punct, SrcPos, SrcToken, Token};
 
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum ParseError {
     UnexpectedToken(Box<SrcToken>, String),
     UnexpectedEndOfStream(SrcPos, String),
@@ -21,6 +21,66 @@ pub enum ParseError {
     UnknownTypeName(TypeName, String),
     ComptimeEval(Box<AstExpression>),
     NumberConversionError(Box<SrcToken>, String),
+}
+
+impl PartialEq for ParseError {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            ParseError::UnexpectedToken(src, s) => {
+                match other {
+                    ParseError::UnexpectedToken(src_other, s_other) => {
+                        src == src_other && s == s_other
+                    },
+                    _ => false,
+                }
+            }
+            ParseError::UnexpectedEndOfStream(src, s) => {
+                match other {
+                    ParseError::UnexpectedEndOfStream(src_other, s_other) => {
+                        src == src_other && s == s_other
+                    },
+                    _ => false,
+                }
+            }
+            ParseError::LexError(e) => {
+                match other {
+                    ParseError::LexError(e_other) => e == e_other,
+                    _ => false,
+                }
+            }
+            ParseError::TypeError(e) => {
+                match other {
+                    ParseError::TypeError(e_other) => e == e_other,
+                    _ => false,
+                }
+            }
+            ParseError::ResolveError(_e) => {
+                false
+            }
+            ParseError::UnknownTypeName(name, s) => {
+                match other {
+                    ParseError::UnknownTypeName(name_other, s_other) => {
+                        name == name_other && s == s_other
+                    },
+                    _ => false,
+                }
+            }
+            ParseError::ComptimeEval(expr) => {
+                match other {
+                    ParseError::ComptimeEval(expr_other) => expr == expr_other,
+                    _ => false,
+                }
+            }
+            ParseError::NumberConversionError(src, s) => {
+                match other {
+                    ParseError::NumberConversionError(src_other, s_other) => {
+                        src == src_other && s == s_other
+                    },
+                    _ => false,
+                }
+            }
+        }
+    }
 }
 
 impl From<LexError> for ParseError {
