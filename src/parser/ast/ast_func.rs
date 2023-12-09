@@ -318,6 +318,7 @@ mod test {
     use crate::parser::ast::ast_func::AstFunc;
     use crate::parser::ast::Parsable;
     use crate::parser::Parser;
+    use crate::parser::resolver::TopLevelNameResolver;
 
     #[test]
     fn test_parse() {
@@ -327,7 +328,8 @@ mod test {
         }
         "#;
 
-        let mut parser = Parser::new(src);
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env(src, &mut env);
         let func = AstFunc::parse(&mut parser);
 
         assert!(func.is_ok());
@@ -342,7 +344,8 @@ mod test {
         }
         "#;
 
-        let mut parser = Parser::new(src);
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env(src, &mut env);
         let func = AstFunc::parse(&mut parser);
 
         assert!(func.is_ok());
@@ -357,7 +360,8 @@ mod test {
         }
         "#;
 
-        let mut parser = Parser::new(src);
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env(src, &mut env);
         let func = AstFunc::parse(&mut parser);
 
         assert!(func.is_ok());
@@ -372,7 +376,8 @@ mod test {
         }
         "#;
 
-        let mut parser = Parser::new(src);
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env(src, &mut env);
         let func = AstFunc::parse(&mut parser);
 
         assert!(func.is_ok());
@@ -387,7 +392,8 @@ mod test {
         }
         "#;
 
-        let mut parser = Parser::new(src);
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env(src, &mut env);
         let func = AstFunc::parse(&mut parser);
 
         assert!(func.is_ok());

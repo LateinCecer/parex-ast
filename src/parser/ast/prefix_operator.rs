@@ -78,11 +78,12 @@ mod test {
     use crate::parser::ast::Parsable;
     use crate::parser::ast::prefix_operator::{AstPrefixExpr, PrefixOp};
     use crate::parser::Parser;
+    use crate::parser::resolver::TopLevelNameResolver;
 
     #[test]
     fn test_prefix() {
         assert_eq!(
-            AstExpression::parse(&mut Parser::new("&42")),
+            AstExpression::parse(&mut Parser::with_env("&42", &mut TopLevelNameResolver::new())),
             Ok(AstExpression::Prefix(AstPrefixExpr {
                 val: Box::new(AstExpression::NumberLit(AstNumberLiteral::Int(42, None))),
                 op: PrefixOp::Ref,
@@ -90,7 +91,7 @@ mod test {
             }))
         );
         assert_eq!(
-            AstExpression::parse(&mut Parser::new("*42")),
+            AstExpression::parse(&mut Parser::with_env("*42", &mut TopLevelNameResolver::new())),
             Ok(AstExpression::Prefix(AstPrefixExpr {
                 val: Box::new(AstExpression::NumberLit(AstNumberLiteral::Int(42, None))),
                 op: PrefixOp::Deref,
@@ -98,7 +99,7 @@ mod test {
             }))
         );
         assert_eq!(
-            AstExpression::parse(&mut Parser::new("-42")),
+            AstExpression::parse(&mut Parser::with_env("-42", &mut TopLevelNameResolver::new())),
             Ok(AstExpression::Prefix(AstPrefixExpr {
                 val: Box::new(AstExpression::NumberLit(AstNumberLiteral::Int(42, None))),
                 op: PrefixOp::Unary,
@@ -106,7 +107,7 @@ mod test {
             }))
         );
         assert_eq!(
-            AstExpression::parse(&mut Parser::new("!42")),
+            AstExpression::parse(&mut Parser::with_env("!42", &mut TopLevelNameResolver::new())),
             Ok(AstExpression::Prefix(AstPrefixExpr {
                 val: Box::new(AstExpression::NumberLit(AstNumberLiteral::Int(42, None))),
                 op: PrefixOp::Invert,

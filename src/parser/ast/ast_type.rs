@@ -550,27 +550,28 @@ mod test {
     use crate::parser::ast::ast_type::AstType;
     use crate::parser::ast::Parsable;
     use crate::parser::Parser;
+    use crate::parser::resolver::TopLevelNameResolver;
 
     #[test]
     fn test_ptr() {
         assert_eq!(
-            AstType::parse(&mut Parser::new("*const usize")),
+            AstType::parse(&mut Parser::with_env("*const usize", &mut TopLevelNameResolver::new())),
             Ok(AstType::Ptr(Box::new(AstType::Base("usize".into()))))
         );
         assert_eq!(
-            AstType::parse(&mut Parser::new("*mut usize")),
+            AstType::parse(&mut Parser::with_env("*mut usize", &mut TopLevelNameResolver::new())),
             Ok(AstType::MutPtr(Box::new(AstType::Base("usize".into()))))
         );
         assert_eq!(
-            AstType::parse(&mut Parser::new("usize")),
+            AstType::parse(&mut Parser::with_env("usize", &mut TopLevelNameResolver::new())),
             Ok(AstType::Base("usize".into()))
         );
         assert_eq!(
-            AstType::parse(&mut Parser::new("[usize]")),
+            AstType::parse(&mut Parser::with_env("[usize]", &mut TopLevelNameResolver::new())),
             Ok(AstType::Slice(Box::new(AstType::Base("usize".into()))))
         );
         assert_eq!(
-            AstType::parse(&mut Parser::new("*const [usize]")),
+            AstType::parse(&mut Parser::with_env("*const [usize]", &mut TopLevelNameResolver::new())),
             Ok(AstType::Ptr(Box::new(AstType::Slice(Box::new(AstType::Base("usize".into()))))))
         );
         // assert_eq!(

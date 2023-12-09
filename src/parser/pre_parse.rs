@@ -12,16 +12,16 @@ use crate::parser::resolver::{ItemVariant, ScopeId};
 
 
 #[derive(Clone, Debug)]
-struct PreModule {
-    name: Option<String>,
-    pos: Option<SrcPos>,
+pub struct PreModule {
+    pub name: Option<String>,
+    pub pos: Option<SrcPos>,
 
-    types: Vec<PreType>,
-    impls: Vec<PreImpl>,
-    traits: Vec<PreTrait>,
-    funcs: Vec<PreFunc>,
-    uses: Vec<AstUse>,
-    stack_level: ScopeId,
+    pub types: Vec<PreType>,
+    pub impls: Vec<PreImpl>,
+    pub traits: Vec<PreTrait>,
+    pub funcs: Vec<PreFunc>,
+    pub uses: Vec<AstUse>,
+    pub stack_level: ScopeId,
 }
 
 
@@ -245,8 +245,8 @@ impl Parsable for PreTrait {
 
 impl PreModule {
 
-    fn parse(parser: &mut Parser, name: String) -> Result<Self, ParseError> {
-        parser.env.push_module(name);
+    pub fn parse(parser: &mut Parser, name: String) -> Result<Self, ParseError> {
+        parser.env.push_module(name.clone());
 
         let mut types = Vec::new();
         let mut impls= Vec::new();
@@ -286,7 +286,8 @@ impl PreModule {
 
         // create module and add items into the namespace entry for it
         let module = PreModule {
-            name: None, pos: None,
+            name: Some(name),
+            pos: Some(SrcPos::default()),
             types,
             impls,
             traits,
@@ -296,7 +297,6 @@ impl PreModule {
         };
         module.push_types(parser)?;
         module.push_traits(parser)?;
-        module.push_use(parser)?;
 
         // pop out of the current stack level
         parser.env.pop();
@@ -306,7 +306,7 @@ impl PreModule {
 
 impl PreModule {
     /// Pushes types to the namespace structure of the parser
-    pub fn push_types(&self, parser: &mut Parser) -> Result<(), ParseError> {
+    fn push_types(&self, parser: &mut Parser) -> Result<(), ParseError> {
         // push structs
         for s in self.types.iter() {
             match &s.var {
@@ -335,7 +335,7 @@ impl PreModule {
     }
 
     /// Pushes traits to the namespace structure of the parser.
-    pub fn push_traits(&self, parser: &mut Parser) -> Result<(), ParseError> {
+    fn push_traits(&self, parser: &mut Parser) -> Result<(), ParseError> {
         // push traits
         for t in self.traits.iter() {
             parser.env.push_top_level_item(t.name.clone(), t.pos, ItemVariant::Trait)?;
@@ -355,7 +355,7 @@ impl PreModule {
 
     /// Parses all structs in the pre-module to proper `AstStruct`s and collects the result into
     /// a `Vec`.
-    fn parse_types(&self, parser: &mut Parser) -> Result<Vec<AstTypeDef>, ParseError> {
+    pub fn parse_types(&self, parser: &mut Parser) -> Result<Vec<AstTypeDef>, ParseError> {
         let mut structs = vec![];
         for s in self.types.iter() {
             parser.reset_until(&s.pos)?;
@@ -364,7 +364,7 @@ impl PreModule {
         Ok(structs)
     }
 
-    fn parse_funcs(&self, parser: &mut Parser) -> Result<Vec<AstFunc>, ParseError> {
+    pub fn parse_funcs(&self, parser: &mut Parser) -> Result<Vec<AstFunc>, ParseError> {
         let mut funcs = vec![];
         for f in self.funcs.iter() {
             parser.reset_until(&f.pos)?;
@@ -373,7 +373,7 @@ impl PreModule {
         Ok(funcs)
     }
 
-    fn parse_impl(&self, parser: &mut Parser) -> Result<Vec<AstImpl>, ParseError> {
+    pub fn parse_impl(&self, parser: &mut Parser) -> Result<Vec<AstImpl>, ParseError> {
         let mut impls = vec![];
         for im in self.impls.iter() {
             parser.reset_until(&im.pos)?;
@@ -382,7 +382,7 @@ impl PreModule {
         Ok(impls)
     }
 
-    fn parse_traits(&self, parser: &mut Parser) -> Result<Vec<AstTrait>, ParseError> {
+    pub fn parse_traits(&self, parser: &mut Parser) -> Result<Vec<AstTrait>, ParseError> {
         let mut traits = vec![];
         for tra in self.traits.iter() {
             parser.reset_until(&tra.pos)?;
@@ -401,6 +401,7 @@ mod test {
     use crate::parser::{ParseError, Parser};
     use crate::parser::ast::Parsable;
     use crate::parser::pre_parse::PreModule;
+    use crate::parser::resolver::TopLevelNameResolver;
 
     #[test]
     fn test_pre_parser() -> Result<(), ParseError> {
@@ -445,7 +446,8 @@ mod test {
         }
         "#;
 
-        let mut parser = Parser::new(src);
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env(src, &mut env);
         let module = PreModule::parse(&mut parser, "test".to_string())?;
 
         println!("pre-parse module: {:#?}", module);

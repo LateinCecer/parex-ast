@@ -310,22 +310,26 @@ mod test {
     use crate::parser::ast::literal::{AstBoolLiteral, AstCharLiteral, AstNumberLiteral, AstStringLiteral};
     use crate::parser::ast::Parsable;
     use crate::parser::Parser;
+    use crate::parser::resolver::TopLevelNameResolver;
 
     #[test]
     fn test_string() {
-        let mut parser = Parser::new("\"Hello, world!\"");
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env("\"Hello, world!\"", &mut env);
         assert_eq!(AstExpression::parse(&mut parser), Ok(AstExpression::StrLit(AstStringLiteral { value: "Hello, world!".to_owned() })))
     }
 
     #[test]
     fn test_char() {
-        let mut parser = Parser::new("'🦦'");
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env("'🦦'", &mut env);
         assert_eq!(AstExpression::parse(&mut parser), Ok(AstExpression::CharLit(AstCharLiteral { value: '🦦' })))
     }
 
     #[test]
     fn test_bool() {
-        let mut parser = Parser::new("true false");
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env("true false", &mut env);
         assert_eq!(AstExpression::parse(&mut parser), Ok(AstExpression::BoolLit(AstBoolLiteral { value: true })));
         assert_eq!(AstExpression::parse(&mut parser), Ok(AstExpression::BoolLit(AstBoolLiteral { value: false })));
     }
@@ -333,48 +337,48 @@ mod test {
     #[test]
     fn test_number() {
         assert_eq!(
-            AstExpression::parse(&mut Parser::new("31_415")),
+            AstExpression::parse(&mut Parser::with_env("31_415", &mut TopLevelNameResolver::new())),
             Ok(AstExpression::NumberLit(AstNumberLiteral::Int(
                 31415, None)))
         );
         assert_eq!(
-            AstExpression::parse(&mut Parser::new("31_415_usize")),
+            AstExpression::parse(&mut Parser::with_env("31_415_usize", &mut TopLevelNameResolver::new())),
             Ok(AstExpression::NumberLit(AstNumberLiteral::Int(
                 31415, Some(AstType::Base("usize".into())))))
         );
 
         assert_eq!(
-            AstExpression::parse(&mut Parser::new("3.14_15")),
+            AstExpression::parse(&mut Parser::with_env("3.14_15", &mut TopLevelNameResolver::new())),
             Ok(AstExpression::NumberLit(AstNumberLiteral::Float(
                 3.1415, None)))
         );
         assert_eq!(
-            AstExpression::parse(&mut Parser::new("3.14_15f32")),
+            AstExpression::parse(&mut Parser::with_env("3.14_15f32", &mut TopLevelNameResolver::new())),
             Ok(AstExpression::NumberLit(AstNumberLiteral::Float(
                 3.1415, Some(AstType::Base("f32".into())))))
         );
         assert_eq!(
-            AstExpression::parse(&mut Parser::new("31415e-4__f64")),
+            AstExpression::parse(&mut Parser::with_env("31415e-4__f64", &mut TopLevelNameResolver::new())),
             Ok(AstExpression::NumberLit(AstNumberLiteral::Float(
                 3.1415, Some(AstType::Base("f64".into())))))
         );
         assert_eq!(
-            AstExpression::parse(&mut Parser::new("314.15e-2")),
+            AstExpression::parse(&mut Parser::with_env("314.15e-2", &mut TopLevelNameResolver::new())),
             Ok(AstExpression::NumberLit(AstNumberLiteral::Float(
                 3.1415, None)))
         );
         assert_eq!(
-            AstExpression::parse(&mut Parser::new("0.031415e2")),
+            AstExpression::parse(&mut Parser::with_env("0.031415e2", &mut TopLevelNameResolver::new())),
             Ok(AstExpression::NumberLit(AstNumberLiteral::Float(
                 3.1415, None)))
         );
         assert_eq!(
-            AstExpression::parse(&mut Parser::new("0.031415e+2")),
+            AstExpression::parse(&mut Parser::with_env("0.031415e+2", &mut TopLevelNameResolver::new())),
             Ok(AstExpression::NumberLit(AstNumberLiteral::Float(
                 3.1415, None)))
         );
         assert_eq!(
-            AstExpression::parse(&mut Parser::new("314.15e-2f32")),
+            AstExpression::parse(&mut Parser::with_env("314.15e-2f32", &mut TopLevelNameResolver::new())),
             Ok(AstExpression::NumberLit(AstNumberLiteral::Float(
                 3.1415, Some(AstType::Base("f32".into())))))
         );
@@ -387,7 +391,7 @@ mod test {
             "isize", "usize",
         ] {
             assert_eq!(
-                AstExpression::parse(&mut Parser::new(&format!("42_{ty}"))),
+                AstExpression::parse(&mut Parser::with_env(&format!("42_{ty}"), &mut TopLevelNameResolver::new())),
                 Ok(AstExpression::NumberLit(AstNumberLiteral::Int(
                     42, Some(AstType::Base(ty.into())))))
             );

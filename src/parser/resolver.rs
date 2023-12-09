@@ -378,7 +378,7 @@ impl TopLevelNameResolver {
         }
         // create new namespace name by appending the name of the namespace to the name of the
         // last namespace
-        let mut name = if self.stack.stack.len() > 1 {
+        let mut name = if !self.stack.stack.is_empty() {
             if let Some(top) = self.stack.stack.last()
                 .and_then(|id| self.stack.memory.get(id)) {
                 top.imports.base_namespace.clone()
@@ -479,6 +479,9 @@ impl TopLevelNameResolver {
         let mut full_name = level.imports.base_namespace.clone();
         full_name.push(name.clone());
 
+        // debug
+        println!("Pushing item {} to resolver", full_name);
+
         // push now stack entry for that item onto the stack
         match &variant {
             ItemVariant::Type | ItemVariant::Trait => self.push_type(name),
@@ -577,10 +580,12 @@ mod test {
     use crate::parser::ast::expression::AstExpression;
     use crate::parser::ast::Parsable;
     use crate::parser::{ParseError, Parser};
+    use crate::parser::resolver::TopLevelNameResolver;
 
     #[test]
     fn test() -> Result<(), ParseError> {
-        let mut parser = Parser::new(r#"
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env(r#"
         {
             let mut x = 5;
             x = if x == 7 {
@@ -610,7 +615,7 @@ mod test {
 
             1 - 2 as f32
         }
-        "#);
+        "#, &mut env);
 
         let expr = AstExpression::parse(&mut parser);
         match expr {

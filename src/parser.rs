@@ -5,9 +5,12 @@ mod structs;
 mod ast;
 mod parameter_env;
 mod pre_parse;
+mod file_parser;
+mod module_parser;
 
 use std::fmt::{Display, Formatter};
-use std::mem;
+use std::{io, mem};
+use std::rc::Rc;
 use crate::lexer::{Lexer, LexError, Punct, SrcPos, SrcToken, Token};
 
 
@@ -21,6 +24,8 @@ pub enum ParseError {
     UnknownTypeName(TypeName, String),
     ComptimeEval(Box<AstExpression>),
     NumberConversionError(Box<SrcToken>, String),
+    IoError(Rc<io::Error>),
+    FileError(FileError)
 }
 
 impl PartialEq for ParseError {
@@ -79,6 +84,12 @@ impl PartialEq for ParseError {
                     _ => false,
                 }
             }
+            ParseError::IoError(e) => {
+                false
+            }
+            ParseError::FileError(_) => {
+                false
+            }
         }
     }
 }
@@ -132,16 +143,22 @@ impl Display for ParseError {
             ParseError::NumberConversionError(token, expected) => {
                 write!(f, "Failed to convert number literal token '{}' at {} to {expected}", token.token, token.pos)
             }
+            ParseError::IoError(e) => {
+                write!(f, "I/O error: {e}")
+            }
+            ParseError::FileError(e) => {
+                write!(f, "File error: {e}")
+            }
         }
     }
 }
 
 
-pub struct Parser<'a> {
+pub struct Parser<'a, 'env> {
     src: &'a str,
     lexer: Lexer<'a>,
     current: Result<SrcToken, LexError>,
-    pub env: TopLevelNameResolver,
+    pub env: &'env mut TopLevelNameResolver,
 }
 
 
@@ -295,17 +312,16 @@ macro_rules! skip_to(
     });
 );
 pub (crate) use skip_to;
+use crate::parser::module_parser::FileError;
 
 
-
-impl<'a> Parser<'a> {
-    /// Creates a new parser from the specified source
-    pub fn new(src: &'a str) -> Self {
+impl<'a, 'env> Parser<'a, 'env> {
+    pub fn with_env(src: &'a str, env: &'env mut TopLevelNameResolver) -> Self {
         let mut parser = Parser {
             src,
             lexer: Lexer::new(src),
             current: Err(LexError::EndOfStream(SrcPos::default())),
-            env: TopLevelNameResolver::new(),
+            env,
         };
         let _ = parser.next();
         parser

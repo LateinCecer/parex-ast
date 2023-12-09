@@ -260,7 +260,7 @@ mod test {
     use crate::parser::{ParseError, Parser};
     use crate::parser::ast::ast_pattern_matching::AstPattern;
     use crate::parser::ast::Parsable;
-    use crate::parser::resolver::ItemVariant;
+    use crate::parser::resolver::{ItemVariant, TopLevelNameResolver};
 
     #[test]
     fn test_parser() -> Result<(), ParseError> {
@@ -269,7 +269,8 @@ test::Some(1 | 3 | 5)
 test::MyData { expl: "hello, world!", c: 'a', }
 None =
         "#;
-        let mut parser = Parser::new(src);
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env(src, &mut env);
         parser.env.push_module("test".to_string());
         parser.env.push_top_level_item(
             "Some".to_string(),

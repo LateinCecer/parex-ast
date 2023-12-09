@@ -124,10 +124,12 @@ mod test {
     use crate::parser::ast::literal::AstNumberLiteral;
     use crate::parser::ast::Parsable;
     use crate::parser::Parser;
+    use crate::parser::resolver::TopLevelNameResolver;
 
     #[test]
     fn test_list() {
-        let mut parser = Parser::new("[0, 1, 2, 3, 4]");
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env("[0, 1, 2, 3, 4]", &mut env);
         assert_eq!(
             AstExpression::parse(&mut parser),
             Ok(AstExpression::ArrayInit(AstArrayInit {
@@ -144,7 +146,8 @@ mod test {
 
     #[test]
     fn test_copy() {
-        let mut parser = Parser::new("[42_u8; 10]");
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env("[42_u8; 10]", &mut env);
         assert_eq!(
             AstExpression::parse(&mut parser),
             Ok(AstExpression::ArrayInit(AstArrayInit {

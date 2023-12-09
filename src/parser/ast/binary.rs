@@ -188,6 +188,7 @@ mod test {
     use crate::parser::ast::literal::AstNumberLiteral;
     use crate::parser::ast::Parsable;
     use crate::parser::Parser;
+    use crate::parser::resolver::TopLevelNameResolver;
 
     #[test]
     fn test_simple() {
@@ -214,7 +215,8 @@ mod test {
             BinaryOp::Assign,
         ] {
             let src = format!("1 {} 2", op.punct());
-            let mut parser = Parser::new(&src);
+            let mut env = TopLevelNameResolver::new();
+            let mut parser = Parser::with_env(&src, &mut env);
             let expr = AstExpression::parse(&mut parser);
             assert_eq!(expr, Ok(AstExpression::Binary(AstBinaryExpr {
                 op,
@@ -228,7 +230,8 @@ mod test {
     #[test]
     fn test_precedence_1() {
         let src = "1 + 2 * 3";
-        let mut parser = Parser::new(src);
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env(&src, &mut env);
         let expr = AstExpression::parse(&mut parser);
 
         assert_eq!(expr, Ok(AstExpression::Binary(AstBinaryExpr {
@@ -247,7 +250,8 @@ mod test {
     #[test]
     fn test_precedence_2() {
         let src = "2 * 3 + 1";
-        let mut parser = Parser::new(src);
+        let mut env = TopLevelNameResolver::new();
+        let mut parser = Parser::with_env(&src, &mut env);
         let expr = AstExpression::parse(&mut parser);
 
         assert_eq!(expr, Ok(AstExpression::Binary(AstBinaryExpr {
